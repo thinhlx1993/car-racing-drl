@@ -310,16 +310,16 @@ def train(sess, env, actor, critic, global_step):
             # print(s.shape)
 
             if np.random.rand() <= eps:
-                action = np.random.uniform(-10, 10, size=3)
+                action = np.random.uniform(-1, 1, 3)
+                action[1] = action[1] + np.random.uniform(0, 1)
                 action = np.expand_dims(action, axis=0)
             else:
-                # Q = model.predict(state)  # Q-values predictions
                 action = actor.predict(np.reshape(s,(-1,96,96,3)))
             # np.random.uniform(0, 1, 3)
             # action = a[0] + 1./(1+i+j) # add noise for exploration
-            # noise = np.random.normal(0,0.2*eps, 3)
-            # noise[1] = np.random.normal(0.4,0.1*eps)
-            # action = a[0] + noise
+            noise = np.random.normal(0,0.2*eps, 3)
+            noise[1] = np.random.normal(0.4,0.1*eps)
+            action[0] = action[0] + noise
             s2, r, terminal, info = env.step(action[0])
             # s2 = prepro(s2)
             # plt.imshow(s2)
