@@ -15,7 +15,7 @@ import gym
 import tflearn
 import matplotlib.pyplot as plt
 
-from replay_buffer import ReplayBuffer
+from replay_buffer_ddpg import ReplayBuffer
 from skimage.color import rgb2grey
 
 # ==========================
@@ -24,7 +24,7 @@ from skimage.color import rgb2grey
 # Max training steps
 MAX_EPISODES = 500000
 # Max episode length
-MAX_EP_STEPS = 2000
+MAX_EP_STEPS = 500
 # Base learning rate for the Actor network
 INITIAL_LR = 0.0001
 MINI_LR = 1e-6
@@ -34,7 +34,7 @@ MINI_LR = 1e-6
 GAMMA = 0.9
 # Soft target update param
 TAU = 0.01
-EPS_DECAY_RATE = 0.999
+EPS_DECAY_RATE = 0.99
 LR_DECAY_RATE = 0.99
 # ===========================
 #   Utility Parameters
@@ -55,6 +55,7 @@ BUFFER_SIZE = 10000
 MINIBATCH_SIZE = 64
 
 SAVE_STEP = 200
+
 
 # ===========================
 #   Actor and Critic DNNs
@@ -146,6 +147,7 @@ class ActorNetwork(object):
     def get_num_trainable_vars(self):
         return self.num_trainable_vars
 
+
 class CriticNetwork(object):
     """ 
     Input to the network is the state and action, output is Q(s,a).
@@ -192,8 +194,7 @@ class CriticNetwork(object):
         # net = tflearn.conv_2d(net, 8, 8, activation='relu', name='critic_conv2')
         net = tflearn.layers.normalization.batch_normalization (net, name='critic_BatchNormalization1')
         net = tflearn.fully_connected(net, 100, activation='relu')
-		# net = tflearn.layers.normalization.batch_normalization (net, name='critic_BatchNormalization1')
-
+        # net = tflearn.layers.normalization.batch_normalization (net, name='critic_BatchNormalization1')
         # Add the action tensor in the 2nd hidden layer
         # Use two temp layers to get the corresponding weights and biases
         t1 = tflearn.fully_connected(net, 50)
@@ -236,6 +237,7 @@ class CriticNetwork(object):
     def update_target_network(self):
         self.sess.run(self.update_target_network_params)
 
+
 # ===========================
 #   Tensorflow Summary Ops
 # ===========================
@@ -249,6 +251,7 @@ def build_summaries():
     summary_ops = tf.summary.merge_all()
 
     return summary_ops, summary_vars
+
 
 # ===========================
 #   Agent Training
@@ -266,11 +269,11 @@ def train(sess, env, actor, critic, global_step):
     
     if checkpoint and checkpoint.model_checkpoint_path:
         saver.restore(sess, checkpoint.model_checkpoint_path)
-        print ("Successfully loaded:", checkpoint.model_checkpoint_path)
+        print("Successfully loaded:", checkpoint.model_checkpoint_path)
         print("global step: ", global_step.eval())
 
     else:
-        print ("Could not find old network weights")
+        print("Could not find old network weights")
 
     writer = tf.summary.FileWriter(SUMMARY_DIR, sess.graph)
 
@@ -282,10 +285,11 @@ def train(sess, env, actor, critic, global_step):
     replay_buffer = ReplayBuffer(BUFFER_SIZE, RANDOM_SEED)
 
     i = global_step.eval()
-    eps = 1
+    eps = 0.99
     lr = INITIAL_LR
+
     while True:
-    	i += 1
+        i += 1
         s = env.reset()
         # s = prepro(s)
         ep_reward = 0
@@ -299,20 +303,25 @@ def train(sess, env, actor, critic, global_step):
             print("Model saved in file: %s" % save_path)
             print("Successfully saved global step: ", global_step.eval())
 
-        for j in xrange(MAX_EP_STEPS):
+        for j in range(MAX_EP_STEPS):
 
             if RENDER_ENV: 
                 env.render()
             # print(s.shape)
 
-            a = actor.predict(np.reshape(s,(-1,96,96,3)))
+            if np.random.rand() <= eps:
+                action = np.random.uniform(-10, 10, size=3)
+                action = np.expand_dims(action, axis=0)
+            else:
+                # Q = model.predict(state)  # Q-values predictions
+                action = actor.predict(np.reshape(s,(-1,96,96,3)))
+            # np.random.uniform(0, 1, 3)
             # action = a[0] + 1./(1+i+j) # add noise for exploration
-            noise = np.random.normal(0,0.2*eps, 3)
-            noise[1] = np.random.normal(0.4,0.1*eps) 
-            action = a[0] + noise
-            s2, r, terminal, info = env.step(action)
+            # noise = np.random.normal(0,0.2*eps, 3)
+            # noise[1] = np.random.normal(0.4,0.1*eps)
+            # action = a[0] + noise
+            s2, r, terminal, info = env.step(action[0])
             # s2 = prepro(s2)
-            action = np.expand_dims(action, axis=0)
             # plt.imshow(s2)
             # plt.show()
             # if r > 0:
@@ -334,7 +343,7 @@ def train(sess, env, actor, critic, global_step):
                 target_q = critic.predict_target(s2_batch, actor.predict_target(s2_batch))
 
                 y_i = []
-                for k in xrange(MINIBATCH_SIZE):
+                for k in range(MINIBATCH_SIZE):
                     if t_batch[k]:
                         y_i.append(r_batch[k])
                     else:
@@ -362,8 +371,7 @@ def train(sess, env, actor, critic, global_step):
                 writer.add_summary(summary_str, i)
                 writer.flush()
 
-                print '| Reward: %.2i' % int(ep_reward), " | Episode", i, \
-                    '| Qmax: %.4f' % (ep_ave_max_q / float(j))
+                print('| Reward: %.2i' % int(ep_reward), " | Episode", i, '| Qmax: %.4f' % (ep_ave_max_q / float(j)))
 
             s = s2
             ep_reward += r
@@ -383,22 +391,8 @@ def train(sess, env, actor, critic, global_step):
 
                 break
 
-def prepro(I):
-  # """ prepro 210x160x3 uint8 frame into 6400 (80x80) 1D float vector """
-  # I = I[35:195] # crop
-  # I = I[::2,::2,0] # downsample by factor of 2
-  # I[I == 144] = 0 # erase background (background type 1)
-  # I[I == 109] = 0 # erase background (background type 2)
-  # I[I != 0] = 1 # everything else (paddles, ball) just set to 1
-  I = rgb2grey(I)
-  return I
-
-def process(S, X):
-	X=np.expand_dim(X, axis=2)
-	self.S1 = np.append(S[:,:,1:], X, axis=2)
 
 def main(_):
-
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
 
@@ -433,6 +427,7 @@ def main(_):
 
         if GYM_MONITOR_EN:
             env.monitor.close()
+
 
 if __name__ == '__main__':
     tf.app.run()
